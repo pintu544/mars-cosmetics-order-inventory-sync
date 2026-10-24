@@ -1,0 +1,35 @@
+flowchart TB
+  INCOMING["Order events: website, Nykaa, Blinkit"]
+  FLIP["Flipkart orders"]
+  API["NestJS webhook API"]
+  POLL["2-minute poller with cursor"]
+  DB[("RDS PostgreSQL<br/>inbox, orders, inventory, ledger, outbox")]
+  RELAY["Transactional outbox relay"]
+  Q[["SQS queues<br/>orders / stock / ERP + DLQs"]]
+  ORDER["Order worker<br/>dedupe + short stock transaction"]
+  STOCK["Stock worker<br/>coalesce latest absolute quantity"]
+  ERP["ERP worker<br/>confirmed orders + stable key"]
+  REDIS[("Redis<br/>channel rate limits only")]
+  CHANNELS["Stock endpoints: website API, Nykaa 1 SKU/call,<br/>Flipkart batches of 50, Blinkit urgent REST + daily CSV"]
+  BC["Microsoft Business Central"]
+  FEED["Warehouse / ERP stock feed"]
+  OPS["Ops UI: failed syncs, audit, retry"]
+  SCALE["ECS workers autoscale from queue backlog / age"]
+
+  INCOMING -->|webhooks| API
+  FLIP -->|poll| POLL
+  API -->|inbox + outbox transaction| DB
+  POLL -->|cursor + inbox + outbox| DB
+  DB --> RELAY --> Q
+  Q --> ORDER
+  ORDER -->|reservation, ledger, next outbox event| DB
+  Q --> STOCK
+  STOCK <-->|shared token bucket| REDIS
+  STOCK --> CHANNELS
+  Q --> ERP --> BC
+  FEED --> DB
+  DB --> OPS
+  Q -. backlog .-> SCALE
+  SCALE -. worker count .-> ORDER
+  SCALE -. worker count .-> STOCK
+  SCALE -. worker count .-> ERP
